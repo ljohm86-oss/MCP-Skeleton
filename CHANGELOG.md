@@ -12,6 +12,7 @@
 - added a formal full-vs-incremental benchmark report for the standalone `MCP-Skeleton` repository
 - added `context` skeleton focus modes for full, tree, imports, symbols, and writing-outline views
 - extended the benchmark harness to compare focus-mode skeleton variants against the full baseline
+- added a formal focus-mode benchmark report for directory and long-text skeleton views
 
 ## Selected history carried into this repo
 
