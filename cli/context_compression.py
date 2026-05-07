@@ -289,15 +289,12 @@ def restore_context_from_package(
         restore_root = output_dir.expanduser().resolve() / root_name
         _restore_directory_blob(restore_root, decoded)
         removed_manifest_path = restore_root / ".ail_incremental_manifest.json"
-        removed_manifest = {
-            "status": "ok",
-            "entrypoint": "context-incremental-restore-manifest",
-            "incremental_scope": str(decoded.get("incremental_scope") or ""),
-            "base_commit": str(decoded.get("base_commit") or ""),
-            "removed_paths": list(decoded.get("removed_paths") or []),
-            "removed_path_count": len(decoded.get("removed_paths") or []),
-        }
-        _write_json(removed_manifest_path, removed_manifest)
+        _write_incremental_restore_manifest(
+            removed_manifest_path,
+            incremental_scope=str(decoded.get("incremental_scope") or ""),
+            base_commit=str(decoded.get("base_commit") or ""),
+            removed_paths=list(decoded.get("removed_paths") or []),
+        )
         restore_summary["restored_paths"].append(str(restore_root))
         restore_summary["restored_paths"].append(str(removed_manifest_path))
         restore_summary["next_steps"].append(f"open {restore_root}")
@@ -603,11 +600,7 @@ def apply_context_patch_payload(
     files = patch_payload.get("files") or {}
     source_label = str(patch_payload.get("source_label") or "context")
     status = "ok"
-    if bool(patch_payload.get("incremental_mode")):
-        raise ValueError(
-            "context patch-apply does not yet support replaying incremental patch bundles; "
-            "export the incremental patch for review or re-run the workflow from one full directory bundle when you need replay"
-        )
+    incremental_mode = bool(patch_payload.get("incremental_mode"))
     merge_mode = str(merge_mode or "overwrite").strip().lower() or "overwrite"
     if merge_mode not in PATCH_APPLY_MERGE_MODES:
         supported = ", ".join(sorted(PATCH_APPLY_MERGE_MODES))
@@ -817,6 +810,27 @@ def apply_context_patch_payload(
                 else:
                     target.unlink()
                 removed_applied.append(str(target))
+        incremental_manifest_path = applied_root / ".ail_incremental_manifest.json"
+        effective_incremental_removed_paths = [
+            _normalize_context_relpath(str(item or ""), field_name="incremental_removed_paths")
+            for item in (patch_payload.get("incremental_removed_paths") or [])
+            if str(item or "").strip()
+        ]
+        if incremental_mode and not dry_run:
+            _write_incremental_restore_manifest(
+                incremental_manifest_path,
+                incremental_scope=str(
+                    patch_payload.get("incremental_scope")
+                    or source_package_payload.get("incremental_scope")
+                    or ""
+                ),
+                base_commit=str(
+                    patch_payload.get("incremental_base_commit")
+                    or source_package_payload.get("incremental_base_commit")
+                    or ""
+                ),
+                removed_paths=effective_incremental_removed_paths,
+            )
         preview_manifest = _build_context_patch_apply_preview_manifest(
             patch_payload=patch_payload,
             patch_mode=patch_mode,
@@ -826,13 +840,34 @@ def apply_context_patch_payload(
         payload = {
             "status": status,
             "entrypoint": "context-patch-apply",
-            "apply_mode": "directory_restore_plus_overlay_preview" if dry_run else "directory_restore_plus_overlay",
+            "apply_mode": (
+                "directory_incremental_restore_plus_overlay_preview"
+                if dry_run and incremental_mode
+                else "directory_incremental_restore_plus_overlay"
+                if incremental_mode
+                else "directory_restore_plus_overlay_preview"
+                if dry_run
+                else "directory_restore_plus_overlay"
+            ),
             "patch_mode": patch_mode,
             "source_label": source_label,
             "dry_run": dry_run,
-            "applied_paths": [str(applied_root)],
+            "applied_paths": [str(applied_root)] + (
+                [str(incremental_manifest_path.resolve())] if incremental_mode and not dry_run else []
+            ),
             "removed_paths_applied": removed_applied,
             "preview_manifest": preview_manifest,
+            "incremental_mode": incremental_mode,
+            "incremental_scope": str(patch_payload.get("incremental_scope") or ""),
+            "incremental_base_commit": str(patch_payload.get("incremental_base_commit") or ""),
+            "incremental_changed_paths": list(patch_payload.get("incremental_changed_paths") or []),
+            "incremental_added_paths": list(patch_payload.get("incremental_added_paths") or []),
+            "incremental_removed_paths": effective_incremental_removed_paths,
+            "incremental_path_count": int(
+                len(patch_payload.get("incremental_changed_paths") or [])
+                + len(patch_payload.get("incremental_added_paths") or [])
+                + len(effective_incremental_removed_paths)
+            ),
             "merge_mode": merge_mode,
             "merge_check_passed": True,
             "merge_conflicts": [],
@@ -1929,6 +1964,14 @@ def _build_context_patch_apply_summary_text(payload: dict[str, Any]) -> str:
         f"applied_path_count: {len(payload.get('applied_paths') or [])}",
         f"removed_path_count: {len(payload.get('removed_paths_applied') or [])}",
     ]
+    if payload.get("incremental_mode"):
+        lines.append("incremental_mode: True")
+        lines.append(f"incremental_scope: {payload.get('incremental_scope', '')}")
+        if payload.get("incremental_base_commit"):
+            lines.append(f"incremental_base_commit: {payload.get('incremental_base_commit', '')}")
+        lines.append(f"incremental_changed_count: {len(payload.get('incremental_changed_paths') or [])}")
+        lines.append(f"incremental_added_count: {len(payload.get('incremental_added_paths') or [])}")
+        lines.append(f"incremental_removed_count: {len(payload.get('incremental_removed_paths') or [])}")
     applied_paths = payload.get("applied_paths") or []
     if applied_paths:
         lines.append(f"first_applied_path: {applied_paths[0]}")
@@ -3180,6 +3223,24 @@ def _restore_directory_blob(restore_root: Path, decoded: dict[str, Any]) -> None
         target_path = _safe_context_target_path(restore_root, str(item.get("relative_path") or ""), field_name="relative_path")
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.symlink_to(str(item.get("link_target") or ""))
+
+
+def _write_incremental_restore_manifest(
+    manifest_path: Path,
+    *,
+    incremental_scope: str,
+    base_commit: str,
+    removed_paths: list[str],
+) -> None:
+    removed_manifest = {
+        "status": "ok",
+        "entrypoint": "context-incremental-restore-manifest",
+        "incremental_scope": incremental_scope,
+        "base_commit": base_commit,
+        "removed_paths": list(removed_paths),
+        "removed_path_count": len(removed_paths),
+    }
+    _write_json(manifest_path, removed_manifest)
 
 
 def _build_context_patch_artifacts(

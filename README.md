@@ -26,6 +26,7 @@ That gives us a practical workflow for large repositories and long documents:
 - `context patch-apply`: replay a patch bundle with dry-run, policy, and merge gates
 - `context compress --incremental`: compress only the git change surface for a directory
 - `context bundle --incremental`: export one incremental bundle instead of rebundling the full project
+- `context patch` and `context patch-apply` on incremental bundles: keep replay scoped to the git change surface
 
 ## Why this is different from summarization
 
@@ -124,6 +125,16 @@ Validate one edited incremental surface:
 PYTHONPATH="$PWD" python3 -m cli context apply-check \
   --package-file /absolute/path/to/context-incremental-bundle/context_manifest.json \
   --input-dir /absolute/path/to/edited-incremental-surface \
+  --json
+```
+
+Replay one edited incremental surface:
+
+```bash
+PYTHONPATH="$PWD" python3 -m cli context patch-apply \
+  --patch-file /absolute/path/to/context-incremental-patch/patch_manifest.json \
+  --source-package-file /absolute/path/to/context-incremental-bundle/context_manifest.json \
+  --output-dir /absolute/path/to/replayed-incremental-surface \
   --json
 ```
 

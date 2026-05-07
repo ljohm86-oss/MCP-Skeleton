@@ -476,7 +476,7 @@ Expected:
 - `patch_mode = directory_structural_patch`
 - `apply_check.apply_check_passed` is present
 
-### D8c. Incremental patch replay guard
+### D8c. Incremental patch replay
 
 ```bash
 python3 -m cli context patch-apply --patch-file /absolute/path/to/context-incremental-patch/patch_manifest.json --source-package-file /absolute/path/to/context-incremental-bundle/context_manifest.json --output-dir /absolute/path/to/replayed-project --json
@@ -484,10 +484,12 @@ python3 -m cli context patch-apply --patch-file /absolute/path/to/context-increm
 
 Expected:
 
-- process exits with usage status
-- `status = error`
-- `error.code = invalid_usage`
-- message explains that incremental patch replay is not yet supported
+- `status = ok`
+- `incremental_mode = true`
+- `apply_mode = directory_incremental_restore_plus_overlay`
+- replayed output includes changed and added files from the incremental surface
+- revived removed paths are restored when present in the candidate snapshot
+- `.ail_incremental_manifest.json` reflects the effective `removed_paths` after replay
 
 ### D9. Policy-aware directory patch replay
 

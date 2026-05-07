@@ -128,10 +128,16 @@ Current incremental patch scope:
 - preserve one effective removed-path list
 - allow one previously removed path to be explicitly revived by placing it back inside the candidate surface
 
-Current intentional boundary:
+`context patch-apply` now also replays incremental patch bundles.
 
-- `context patch-apply` does **not** yet replay incremental patch bundles
-- replay is blocked until the incremental manifest update contract is finalized
+Replay semantics for incremental bundles:
+
+- restore the original incremental surface into one safe output root
+- overlay changed and added candidate payloads
+- remove paths from the effective removed-path set
+- rewrite `.ail_incremental_manifest.json` so the replayed surface carries the current removed-path contract forward
+
+It still does not pretend to reconstruct the full repository tree unless that full tree was part of the incremental surface.
 
 ## Bundle Shape
 

@@ -32,7 +32,7 @@ ok_context_patch_apply_text_json=false
 ok_context_patch_apply_directory_json=false
 ok_context_patch_apply_dry_run_report_json=false
 ok_context_patch_apply_policy_template_json=false
-ok_context_patch_apply_incremental_block_json=false
+ok_context_patch_apply_incremental_json=false
 ok_context_restore_invalid_relpath_json=false
 ok_context_scale_benchmark_json=false
 
@@ -380,22 +380,28 @@ assert 'src/generated' in p['policy_template']['forbid_roots']
 PY
 ok_context_patch_apply_policy_template_json=true
 
-# incremental patch apply blocked
-patch_apply_incremental_block_json="$TMP_ROOT/patch_apply_incremental_block.json"
-set +e
-python3 -m cli context patch-apply --patch-file "$TMP_ROOT/patch_incremental/patch_manifest.json" --source-package-file "$incremental_bundle/context_manifest.json" --output-dir "$TMP_ROOT/incremental_replay" --json > "$patch_apply_incremental_block_json"
-rc=$?
-set -e
-python3 - "$patch_apply_incremental_block_json" "$rc" <<'PY'
-import json, sys
+# incremental patch apply
+patch_apply_incremental_json="$TMP_ROOT/patch_apply_incremental.json"
+python3 -m cli context patch-apply --patch-file "$TMP_ROOT/patch_incremental/patch_manifest.json" --source-package-file "$incremental_bundle/context_manifest.json" --output-dir "$TMP_ROOT/incremental_replay" --json > "$patch_apply_incremental_json"
+python3 - "$patch_apply_incremental_json" "$TMP_ROOT/incremental_replay/project" "$incremental_candidate" <<'PY'
+import hashlib, json, sys
+from pathlib import Path
 p = json.loads(open(sys.argv[1], encoding='utf-8').read())
-rc = int(sys.argv[2])
-assert rc == 2
-assert p['status'] == 'error'
-assert p['error']['code'] == 'invalid_usage'
-assert 'does not yet support replaying incremental patch bundles' in p['error']['message']
+root = Path(sys.argv[2])
+candidate = Path(sys.argv[3])
+assert p['status'] == 'ok'
+assert p['incremental_mode'] is True
+assert p['apply_mode'] == 'directory_incremental_restore_plus_overlay'
+assert p['incremental_changed_paths'] == ['src/app.py']
+assert p['incremental_added_paths'] == ['src/new.py']
+assert p['incremental_removed_paths'] == []
+assert p['incremental_path_count'] == 2
+for rel_path in ['src/app.py', 'src/new.py', 'docs/notes.md']:
+    assert hashlib.sha256((root / rel_path).read_bytes()).hexdigest() == hashlib.sha256((candidate / rel_path).read_bytes()).hexdigest()
+manifest = json.loads((root / '.ail_incremental_manifest.json').read_text(encoding='utf-8'))
+assert manifest['removed_paths'] == []
 PY
-ok_context_patch_apply_incremental_block_json=true
+ok_context_patch_apply_incremental_json=true
 
 # invalid relpath restore blocked
 invalid_manifest="$TMP_ROOT/invalid_manifest.json"
@@ -460,7 +466,7 @@ export CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_TEXT_JSON="$ok_context_patch_apply_text_
 export CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_DIRECTORY_JSON="$ok_context_patch_apply_directory_json"
 export CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_DRY_RUN_REPORT_JSON="$ok_context_patch_apply_dry_run_report_json"
 export CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_POLICY_TEMPLATE_JSON="$ok_context_patch_apply_policy_template_json"
-export CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_INCREMENTAL_BLOCK_JSON="$ok_context_patch_apply_incremental_block_json"
+export CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_INCREMENTAL_JSON="$ok_context_patch_apply_incremental_json"
 export CLI_SMOKE_OK_CONTEXT_RESTORE_INVALID_RELPATH_JSON="$ok_context_restore_invalid_relpath_json"
 export CLI_SMOKE_OK_CONTEXT_SCALE_BENCHMARK_JSON="$ok_context_scale_benchmark_json"
 
@@ -485,7 +491,7 @@ checks = {
     'context_patch_apply_directory_json_ok': os.environ['CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_DIRECTORY_JSON'] == 'true',
     'context_patch_apply_dry_run_report_json_ok': os.environ['CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_DRY_RUN_REPORT_JSON'] == 'true',
     'context_patch_apply_policy_template_json_ok': os.environ['CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_POLICY_TEMPLATE_JSON'] == 'true',
-    'context_patch_apply_incremental_block_json_ok': os.environ['CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_INCREMENTAL_BLOCK_JSON'] == 'true',
+    'context_patch_apply_incremental_json_ok': os.environ['CLI_SMOKE_OK_CONTEXT_PATCH_APPLY_INCREMENTAL_JSON'] == 'true',
     'context_restore_invalid_relpath_json_ok': os.environ['CLI_SMOKE_OK_CONTEXT_RESTORE_INVALID_RELPATH_JSON'] == 'true',
     'context_scale_benchmark_json_ok': os.environ['CLI_SMOKE_OK_CONTEXT_SCALE_BENCHMARK_JSON'] == 'true',
 }
